@@ -71,6 +71,8 @@ func Add(cc *config.ClusterConfig, n config.Node, delOnFail bool) error {
 	}
 
 	_, err = Start(s, false)
+
+	checkCoreDNSIp(*cc)
 	return err
 }
 

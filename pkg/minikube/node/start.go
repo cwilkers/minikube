@@ -836,3 +836,41 @@ To see benchmarks checkout https://minikube.sigs.k8s.io/docs/benchmarks/cpuusage
 `, out.V{"drivers": altDriverList.String()})
 	}
 }
+
+// Check whether coredns is running in the correct CIDR and restart pod if not
+func checkCoreDNSIp(cc config.ClusterConfig) error {
+	api, err := machine.NewAPIClient()
+	if err != nil {
+		klog.Errorf("failed to access api with %v", err)
+		return err
+	}
+	host, err := machine.LoadHost(api, cc.Name)
+	runner, err := machine.CommandRunner(host)
+	kubectl := kapi.KubectlBinaryPath(cc.KubernetesConfig.KubernetesVersion)
+
+	getip := fmt.Sprintf("sudo %s --kubeconfig=/var/lib/minikube/kubeconfig -n kube-system get po -l k8s-app=kube-dns -o jsonpath='{.items[0].status.podIP}'", kubectl)
+
+	out, err := runner.RunCmd(exec.Command("/bin/bash", "-c", getip))
+	if  err != nil {
+		klog.Errorf("failed to read coredns podIP with %v", err)
+		return err
+	}
+
+	podip := strings.TrimSpace(out.Stdout.String())
+	_, podcidr, err := net.ParseCIDR(cni.DefaultPodCIDR)
+
+	if podcidr.Contains(net.ParseIP(podip)) {
+		// everything looks ok, noop
+		return nil
+	}
+
+	klog.Infof("CoreDNS podIP %s not in default Pod CIDR %s", podip, cni.DefaultPodCIDR)
+
+    delcmd := fmt.Sprintf("sudo %s --kubeconfig=/var/lib/minikube/kubeconfig -n kube-system delete po -l k8s-app=kube-dns", kubectl)
+	_, err = runner.RunCmd(exec.Command("/bin/bash", "-c", delcmd))
+	if err != nil {
+		klog.Errorf("failed to delete coredns Pod with %v", err)
+		return err
+	}
+	return nil
+}
